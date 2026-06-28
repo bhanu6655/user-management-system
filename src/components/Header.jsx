@@ -1,7 +1,20 @@
-export default function Header({ onAddUser, search, onSearchChange, onClearSearch }) {
+/**
+ * Application header.
+ *
+ * Contains the brand logo, global search bar, and the Add User button.
+ *
+ * @param {Object}   props
+ * @param {string}   props.search          - Current search input value.
+ * @param {Function} props.onSearchChange  - Called with the new string on every keystroke.
+ * @param {Function} props.onClearSearch   - Clears the search field.
+ * @param {Function} props.onAddUser       - Opens the Add User modal.
+ */
+export default function Header({ search, onSearchChange, onClearSearch, onAddUser }) {
   return (
     <header className="app-header">
       <div className="header-inner">
+
+        {/* Brand identity */}
         <div className="header-brand">
           <div className="brand-icon">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -17,10 +30,12 @@ export default function Header({ onAddUser, search, onSearchChange, onClearSearc
           </div>
         </div>
 
+        {/* Global search — debounced in App via useDebounce */}
         <div className="header-search">
           <div className="search-wrapper">
             <svg className="search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <circle cx="11" cy="11" r="8" /><line x1="21" y1="21" x2="16.65" y2="16.65" />
+              <circle cx="11" cy="11" r="8" />
+              <line x1="21" y1="21" x2="16.65" y2="16.65" />
             </svg>
             <input
               id="global-search"
@@ -30,11 +45,17 @@ export default function Header({ onAddUser, search, onSearchChange, onClearSearc
               value={search}
               onChange={e => onSearchChange(e.target.value)}
               autoComplete="off"
+              aria-label="Search users"
             />
             {search && (
-              <button className="search-clear" onClick={onClearSearch} aria-label="Clear search">
+              <button
+                className="search-clear"
+                onClick={onClearSearch}
+                aria-label="Clear search"
+              >
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
-                  <line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />
+                  <line x1="18" y1="6" x2="6" y2="18" />
+                  <line x1="6" y1="6" x2="18" y2="18" />
                 </svg>
               </button>
             )}
@@ -44,11 +65,13 @@ export default function Header({ onAddUser, search, onSearchChange, onClearSearc
         <div className="header-actions">
           <button className="btn btn-primary" onClick={onAddUser}>
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
-              <line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" />
+              <line x1="12" y1="5" x2="12" y2="19" />
+              <line x1="5" y1="12" x2="19" y2="12" />
             </svg>
             <span>Add User</span>
           </button>
         </div>
+
       </div>
     </header>
   );

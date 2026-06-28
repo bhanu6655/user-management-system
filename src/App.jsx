@@ -1,49 +1,82 @@
-import { useState, useEffect, useCallback } from 'react';
-import Header from './components/Header.jsx';
-import StatsBar from './components/StatsBar.jsx';
-import UsersTable from './components/UsersTable.jsx';
-import UserModal from './components/UserModal.jsx';
+import { useState, useEffect } from 'react';
+
+import Header      from './components/Header.jsx';
+import StatsBar    from './components/StatsBar.jsx';
+import UsersTable  from './components/UsersTable.jsx';
+import UserModal   from './components/UserModal.jsx';
 import DeleteModal from './components/DeleteModal.jsx';
 import FilterPopup from './components/FilterPopup.jsx';
-import { Toast } from './components/Toast.jsx';
+import { Toast }   from './components/Toast.jsx';
+
 import { getUsers, addUser, updateUser, deleteUser } from './api.js';
-import { useToast, useDebounce } from './hooks.js';
+import { useToast, useDebounce }                     from './hooks.js';
+import { filterUsers, sortUsers }                    from './utils.js';
+import { DEFAULT_FILTERS, DEFAULT_SORT, NEXT_ID_START } from './constants/index.js';
 
-let nextId = 209;
+/**
+ * Counter used to generate unique IDs for locally-created users.
+ * Starts above the DummyJSON range (1-208) to avoid collisions.
+ */
+let localIdCounter = NEXT_ID_START;
 
+/**
+ * Root application component.
+ *
+ * Owns all global state: the user list, UI visibility flags, search/filter/sort
+ * parameters, and pagination settings. Child components receive only the slice
+ * of state they need and callbacks to request changes.
+ */
 export default function App() {
-  const [users, setUsers]               = useState([]);
-  const [loading, setLoading]           = useState(true);
-  const [error, setError]               = useState('');
-  const [search, setSearch]             = useState('');
-  const [filters, setFilters]           = useState({ firstName: '', lastName: '', email: '', department: '' });
-  const [sortKey, setSortKey]           = useState('id');
-  const [sortDir, setSortDir]           = useState('asc');
-  const [currentPage, setCurrentPage]   = useState(1);
-  const [pageSize, setPageSize]         = useState(10);
-  const [filterOpen, setFilterOpen]     = useState(false);
-  const [editUser, setEditUser]         = useState(null);
-  const [deleteTarget, setDeleteTarget] = useState(null);
-  const [modalOpen, setModalOpen]       = useState(false);
-  const [deleteOpen, setDeleteOpen]     = useState(false);
+  // ── Data state ──────────────────────────────────────────────────────────────
+  const [users, setUsers]     = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError]     = useState('');
+
+  // ── Search / filter / sort state ────────────────────────────────────────────
+  const [searchInput, setSearchInput] = useState('');
+  const [filters, setFilters]         = useState(DEFAULT_FILTERS);
+  const [sortKey, setSortKey]         = useState(DEFAULT_SORT.key);
+  const [sortDir, setSortDir]         = useState(DEFAULT_SORT.dir);
+
+  // ── Pagination state ─────────────────────────────────────────────────────────
+  const [currentPage, setCurrentPage] = useState(1);
+  const [pageSize, setPageSize]       = useState(10);
+
+  // ── Modal / overlay visibility ───────────────────────────────────────────────
+  const [isFilterOpen, setIsFilterOpen]   = useState(false);
+  const [isUserModalOpen, setIsUserModalOpen]     = useState(false);
+  const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
+
+  // ── Selected-item state for edit / delete flows ──────────────────────────────
+  const [userBeingEdited, setUserBeingEdited]   = useState(null);
+  const [userBeingDeleted, setUserBeingDeleted] = useState(null);
 
   const { toasts, showToast, removeToast } = useToast();
-  const debouncedSearch = useDebounce(search, 250);
 
+  // Debounce the raw search input so filtering only runs after typing stops.
+  const debouncedSearch = useDebounce(searchInput, 250);
+
+  // Fetch users once on mount.
   useEffect(() => { loadUsers(); }, []);
 
+  // Close all overlays when the user presses Escape.
   useEffect(() => {
-    const handler = e => {
-      if (e.key === 'Escape') {
-        setModalOpen(false);
-        setDeleteOpen(false);
-        setFilterOpen(false);
-      }
-    };
-    document.addEventListener('keydown', handler);
-    return () => document.removeEventListener('keydown', handler);
+    function handleEscape(event) {
+      if (event.key !== 'Escape') return;
+      setIsUserModalOpen(false);
+      setIsDeleteModalOpen(false);
+      setIsFilterOpen(false);
+    }
+    document.addEventListener('keydown', handleEscape);
+    return () => document.removeEventListener('keydown', handleEscape);
   }, []);
 
+  // ── Data fetching ────────────────────────────────────────────────────────────
+
+  /**
+   * Loads all users from the API and replaces the local user list.
+   * Handles loading and error states so the UI can respond appropriately.
+   */
   async function loadUsers() {
     setLoading(true);
     setError('');
@@ -53,93 +86,142 @@ export default function App() {
       showToast('info', 'Users loaded', `${data.length} users fetched.`);
     } catch (err) {
       setError(err.message);
-      showToast('error', 'Failed to load', err.message);
+      showToast('error', 'Failed to load users', err.message);
     } finally {
       setLoading(false);
     }
   }
 
-  const filtered = (() => {
-    let result = [...users];
-    const q = debouncedSearch.toLowerCase();
-    if (q) result = result.filter(u =>
-      u.firstName.toLowerCase().includes(q) ||
-      u.lastName.toLowerCase().includes(q) ||
-      u.email.toLowerCase().includes(q) ||
-      u.department.toLowerCase().includes(q) ||
-      String(u.id).includes(q)
-    );
-    if (filters.firstName)  result = result.filter(u => u.firstName.toLowerCase().includes(filters.firstName.toLowerCase()));
-    if (filters.lastName)   result = result.filter(u => u.lastName.toLowerCase().includes(filters.lastName.toLowerCase()));
-    if (filters.email)      result = result.filter(u => u.email.toLowerCase().includes(filters.email.toLowerCase()));
-    if (filters.department) result = result.filter(u => u.department.toLowerCase().includes(filters.department.toLowerCase()));
-    result.sort((a, b) => {
-      let av = a[sortKey], bv = b[sortKey];
-      if (sortKey === 'id') return sortDir === 'asc' ? av - bv : bv - av;
-      av = String(av).toLowerCase(); bv = String(bv).toLowerCase();
-      if (av < bv) return sortDir === 'asc' ? -1 : 1;
-      if (av > bv) return sortDir === 'asc' ? 1 : -1;
-      return 0;
-    });
-    return result;
-  })();
+  // ── Derived data ─────────────────────────────────────────────────────────────
 
-  const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize));
+  /**
+   * Apply search, column filters, and sort to produce the visible user list.
+   * Computed inline so it always reflects the latest state.
+   */
+  const filteredUsers = sortUsers(
+    filterUsers(users, debouncedSearch, filters),
+    sortKey,
+    sortDir
+  );
+
+  const totalPages = Math.max(1, Math.ceil(filteredUsers.length / pageSize));
+  // Ensure currentPage never exceeds the available pages after filtering.
   const safePage   = Math.min(currentPage, totalPages);
 
-  function handleSort(key) {
-    if (sortKey === key) setSortDir(d => d === 'asc' ? 'desc' : 'asc');
-    else { setSortKey(key); setSortDir('asc'); }
+  // Count of active column filters shown on the filter button badge.
+  const activeFilterCount = Object.values(filters).filter(val => val).length;
+
+  // ── Sort handlers ─────────────────────────────────────────────────────────────
+
+  /**
+   * Toggles sort direction when clicking the same column, or switches to a new
+   * column with ascending direction.
+   *
+   * @param {string} columnKey - The column field name to sort by.
+   */
+  function handleSort(columnKey) {
+    if (sortKey === columnKey) {
+      setSortDir(prev => (prev === 'asc' ? 'desc' : 'asc'));
+    } else {
+      setSortKey(columnKey);
+      setSortDir('asc');
+    }
     setCurrentPage(1);
   }
 
+  // ── Pagination handlers ───────────────────────────────────────────────────────
+
+  /**
+   * Changes the number of rows shown per page and resets to page 1.
+   *
+   * @param {number} size - New page size value.
+   */
   function handlePageSizeChange(size) {
     setPageSize(size);
     setCurrentPage(1);
   }
 
+  // ── Filter handlers ───────────────────────────────────────────────────────────
+
+  /**
+   * Applies the user's filter selections from the Filter popup.
+   *
+   * @param {Object} newFilters - Filter map from FilterPopup.
+   */
   function handleFilterApply(newFilters) {
     setFilters(newFilters);
     setCurrentPage(1);
   }
 
-  function handleFilterRemove(key) {
-    setFilters(prev => ({ ...prev, [key]: '' }));
+  /**
+   * Clears a single column filter by key.
+   *
+   * @param {string} filterKey - The filter field name to clear (e.g. 'email').
+   */
+  function handleFilterRemove(filterKey) {
+    setFilters(prev => ({ ...prev, [filterKey]: '' }));
     setCurrentPage(1);
   }
 
+  /** Resets all search, filter, and sort state to their defaults. */
   function handleResetAll() {
-    setSearch('');
-    setFilters({ firstName: '', lastName: '', email: '', department: '' });
-    setSortKey('id');
-    setSortDir('asc');
+    setSearchInput('');
+    setFilters(DEFAULT_FILTERS);
+    setSortKey(DEFAULT_SORT.key);
+    setSortDir(DEFAULT_SORT.dir);
     setCurrentPage(1);
   }
 
-  function openAdd() {
-    setEditUser(null);
-    setModalOpen(true);
+  // ── Modal open handlers ───────────────────────────────────────────────────────
+
+  /** Opens the Add User modal with no pre-filled user. */
+  function openAddUserModal() {
+    setUserBeingEdited(null);
+    setIsUserModalOpen(true);
   }
 
-  function openEdit(user) {
-    setEditUser(user);
-    setModalOpen(true);
+  /**
+   * Opens the Edit User modal pre-filled with the selected user's data.
+   *
+   * @param {Object} user - The user object to edit.
+   */
+  function openEditUserModal(user) {
+    setUserBeingEdited(user);
+    setIsUserModalOpen(true);
   }
 
-  function openDelete(user) {
-    setDeleteTarget(user);
-    setDeleteOpen(true);
+  /**
+   * Opens the Delete confirmation modal for the selected user.
+   *
+   * @param {Object} user - The user object to delete.
+   */
+  function openDeleteModal(user) {
+    setUserBeingDeleted(user);
+    setIsDeleteModalOpen(true);
   }
 
-  async function handleSave(formData, id) {
+  // ── CRUD handlers ─────────────────────────────────────────────────────────────
+
+  /**
+   * Saves a user — creates a new one or updates an existing one depending on
+   * whether `userId` is provided.
+   *
+   * Optimistically updates local state so the UI reflects changes immediately.
+   *
+   * @param {Object}      formData - Validated form values from UserModal.
+   * @param {number|null} userId   - ID of the user to update, or null for create.
+   * @throws {Error} Re-throws API errors so UserModal can keep its loading state.
+   */
+  async function handleSaveUser(formData, userId) {
     try {
-      if (id) {
-        await updateUser(id, formData);
-        setUsers(prev => prev.map(u => u.id === id ? { ...u, ...formData } : u));
+      if (userId) {
+        await updateUser(userId, formData);
+        setUsers(prev => prev.map(u => (u.id === userId ? { ...u, ...formData } : u)));
         showToast('success', 'User updated!', `${formData.firstName} ${formData.lastName} has been updated.`);
       } else {
         await addUser(formData);
-        setUsers(prev => [{ id: nextId++, ...formData }, ...prev]);
+        // Assign a local ID since DummyJSON does not persist the new record.
+        setUsers(prev => [{ id: localIdCounter++, ...formData }, ...prev]);
         showToast('success', 'User added!', `${formData.firstName} ${formData.lastName} has been added.`);
       }
     } catch (err) {
@@ -148,35 +230,49 @@ export default function App() {
     }
   }
 
-  async function handleDelete() {
+  /**
+   * Deletes the currently targeted user after API confirmation.
+   *
+   * @throws {Error} Re-throws API errors so DeleteModal can keep its loading state.
+   */
+  async function handleDeleteUser() {
     try {
-      await deleteUser(deleteTarget.id);
-      setUsers(prev => prev.filter(u => u.id !== deleteTarget.id));
-      showToast('success', 'User deleted', `${deleteTarget.firstName} ${deleteTarget.lastName} removed.`);
+      await deleteUser(userBeingDeleted.id);
+      setUsers(prev => prev.filter(u => u.id !== userBeingDeleted.id));
+      showToast('success', 'User deleted', `${userBeingDeleted.firstName} ${userBeingDeleted.lastName} removed.`);
     } catch (err) {
       showToast('error', 'Delete failed', err.message);
       throw err;
     }
   }
 
-  const filterCount = Object.values(filters).filter(v => v).length;
+  // ── Render ────────────────────────────────────────────────────────────────────
 
   return (
     <>
+      {/* Toast notification stack — rendered outside the main layout flow */}
       <div id="toast-container">
-        {toasts.map(t => <Toast key={t.id} toast={t} onRemove={removeToast} />)}
+        {toasts.map(toast => (
+          <Toast key={toast.id} toast={toast} onRemove={removeToast} />
+        ))}
       </div>
 
       <Header
-        search={search}
-        onSearchChange={v => { setSearch(v); setCurrentPage(1); }}
-        onClearSearch={() => { setSearch(''); setCurrentPage(1); }}
-        onAddUser={openAdd}
+        search={searchInput}
+        onSearchChange={value => { setSearchInput(value); setCurrentPage(1); }}
+        onClearSearch={() => { setSearchInput(''); setCurrentPage(1); }}
+        onAddUser={openAddUserModal}
       />
 
       <main className="main-content">
-        <StatsBar users={users} filtered={filtered} currentPage={safePage} totalPages={totalPages} />
+        <StatsBar
+          users={users}
+          filtered={filteredUsers}
+          currentPage={safePage}
+          totalPages={totalPages}
+        />
 
+        {/* Show an error card if the initial data fetch failed */}
         {error ? (
           <div className="table-card">
             <div className="error-state">
@@ -194,7 +290,7 @@ export default function App() {
           </div>
         ) : (
           <UsersTable
-            users={filtered}
+            users={filteredUsers}
             loading={loading}
             sortKey={sortKey}
             sortDir={sortDir}
@@ -202,13 +298,13 @@ export default function App() {
             pageSize={pageSize}
             totalPages={totalPages}
             filters={filters}
-            filterCount={filterCount}
+            filterCount={activeFilterCount}
             onSort={handleSort}
-            onEdit={openEdit}
-            onDelete={openDelete}
+            onEdit={openEditUserModal}
+            onDelete={openDeleteModal}
             onPageChange={setCurrentPage}
             onPageSizeChange={handlePageSizeChange}
-            onFilterOpen={() => setFilterOpen(true)}
+            onFilterOpen={() => setIsFilterOpen(true)}
             onFilterRemove={handleFilterRemove}
             onResetAll={handleResetAll}
           />
@@ -216,24 +312,24 @@ export default function App() {
       </main>
 
       <FilterPopup
-        isOpen={filterOpen}
+        isOpen={isFilterOpen}
         filters={filters}
         onApply={handleFilterApply}
-        onClose={() => setFilterOpen(false)}
+        onClose={() => setIsFilterOpen(false)}
       />
 
       <UserModal
-        isOpen={modalOpen}
-        user={editUser}
-        onClose={() => setModalOpen(false)}
-        onSave={handleSave}
+        isOpen={isUserModalOpen}
+        user={userBeingEdited}
+        onClose={() => setIsUserModalOpen(false)}
+        onSave={handleSaveUser}
       />
 
       <DeleteModal
-        isOpen={deleteOpen}
-        user={deleteTarget}
-        onClose={() => setDeleteOpen(false)}
-        onConfirm={handleDelete}
+        isOpen={isDeleteModalOpen}
+        user={userBeingDeleted}
+        onClose={() => setIsDeleteModalOpen(false)}
+        onConfirm={handleDeleteUser}
       />
     </>
   );
