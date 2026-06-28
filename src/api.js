@@ -1,4 +1,16 @@
-const API = 'https://jsonplaceholder.typicode.com';
+const API = 'https://dummyjson.com';
+
+function normalizeUser(u) {
+  return {
+    id:         u.id,
+    firstName:  u.firstName || '',
+    lastName:   u.lastName  || '',
+    email:      u.email     || '',
+    department: u.company?.department || '',
+    phone:      u.phone     || '',
+    website:    u.company?.name ? u.company.name.toLowerCase().replace(/\s+/g, '') + '.com' : '',
+  };
+}
 
 async function apiFetch(path, options = {}) {
   const res = await fetch(`${API}${path}`, {
@@ -9,33 +21,20 @@ async function apiFetch(path, options = {}) {
   return res.json();
 }
 
-function normalizeUser(u) {
-  const parts = (u.name || '').trim().split(/\s+/);
-  return {
-    id: u.id,
-    firstName: parts[0] || '',
-    lastName: parts.slice(1).join(' ') || '',
-    email: u.email || '',
-    department: u.company?.name || '',
-    phone: u.phone || '',
-    website: u.website || '',
-  };
-}
-
 export async function getUsers() {
-  const data = await apiFetch('/users');
-  return data.map(normalizeUser);
+  const data = await apiFetch('/users?limit=208&select=id,firstName,lastName,email,phone,company');
+  return data.users.map(normalizeUser);
 }
 
 export async function addUser(data) {
-  await apiFetch('/users', {
+  await apiFetch('/users/add', {
     method: 'POST',
     body: JSON.stringify({
-      name: `${data.firstName} ${data.lastName}`,
-      email: data.email,
-      phone: data.phone,
-      website: data.website,
-      company: { name: data.department },
+      firstName: data.firstName,
+      lastName:  data.lastName,
+      email:     data.email,
+      phone:     data.phone,
+      company:   { department: data.department, name: data.website },
     }),
   });
 }
@@ -44,12 +43,11 @@ export async function updateUser(id, data) {
   await apiFetch(`/users/${id}`, {
     method: 'PUT',
     body: JSON.stringify({
-      id,
-      name: `${data.firstName} ${data.lastName}`,
-      email: data.email,
-      phone: data.phone,
-      website: data.website,
-      company: { name: data.department },
+      firstName: data.firstName,
+      lastName:  data.lastName,
+      email:     data.email,
+      phone:     data.phone,
+      company:   { department: data.department, name: data.website },
     }),
   });
 }
